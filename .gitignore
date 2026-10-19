@@ -23,3 +23,14 @@ reports/*
 .idea/
 .DS_Store
 Thumbs.db
+
+.venv/
+.venv311/
+__pycache__/
+*.py[cod]
+.env
+
+data/PlantVillage/
+models/*.keras
+reports/*.csv
+reports/*_metrics.json
