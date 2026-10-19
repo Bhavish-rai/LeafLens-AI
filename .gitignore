@@ -1,36 +1,91 @@
+
+# ==========================================
 # Python
+# ==========================================
 __pycache__/
 *.py[cod]
-.venv/
-venv/
+*$py.class
+*.pyd
+*.so
 
-# Secrets and local configuration
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ==========================================
+# Environment variables and secrets
+# ==========================================
 .env
 .env.*
+!.env.example
+*.pem
+*.key
 
-# Datasets and trained models
-data/*
-!data/.gitkeep
-models/*
-!models/.gitkeep
+# ==========================================
+# Jupyter and tooling
+# ==========================================
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Generated results
-reports/*
-!reports/.gitkeep
+# ==========================================
+# PlantVillage dataset
+# ==========================================
+data/PlantVillage/
+data/plantvillage/
+datasets/
+dataset/
 
-# Editor and OS files
+# ==========================================
+# Trained models and model checkpoints
+# ==========================================
+models/*.keras
+models/*.h5
+models/*.hdf5
+models/*.weights.h5
+models/checkpoints/
+*.tflite
+*.onnx
+*.pb
+
+# ==========================================
+# Generated evaluation reports
+# Keep source-controlled class_names.json
+# ==========================================
+reports/*.csv
+reports/*_metrics.json
+reports/*_classification_report.json
+reports/*_predictions.csv
+reports/*_confusion_matrix.png
+reports/model_comparison.png
+reports/gradcam_*.png
+
+# ==========================================
+# Logs and temporary files
+# ==========================================
+*.log
+logs/
+tmp/
+temp/
+.streamlit/secrets.toml
+
+# ==========================================
+# Editors and operating systems
+# ==========================================
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-.venv/
-.venv311/
-__pycache__/
-*.py[cod]
-.env
-
-data/PlantVillage/
-models/*.keras
-reports/*.csv
-reports/*_metrics.json
+desktop.ini
