@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets and local configuration
+.env
+.env.*
+
+# Datasets and trained models
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+
+# Generated results
+reports/*
+!reports/.gitkeep
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
