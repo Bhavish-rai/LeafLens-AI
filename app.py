@@ -4,12 +4,16 @@ import hashlib
 import html
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
 
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 import numpy as np
 import streamlit as st
 import tensorflow as tf
@@ -25,6 +29,10 @@ MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
 CLASS_FILE = REPORTS_DIR / "class_names.json"
 GRADCAM_SCRIPT = ROOT / "src" / "gradcam.py"
+GEMINI_MODEL = "gemini-3.8-flash"
+
+# Load local development secrets without placing them in source code.
+load_dotenv(ROOT / ".env")
 
 IMAGE_SIZE = (224, 224)
 MAX_UPLOAD_MB = 15
@@ -406,6 +414,126 @@ def predict(model, image, model_key, class_names):
 
 
 # =========================================================
+# GEMINI DISEASE ASSISTANT
+# =========================================================
+
+@st.cache_resource(show_spinner=False)
+def get_gemini_client(api_key):
+    """Create and reuse a Gemini API client with a finite request timeout."""
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=20000),
+    )
+
+
+def get_gemini_api_key():
+    """Read the key from Streamlit secrets or the local .env environment."""
+    try:
+        secret_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        secret_key = ""
+
+    return secret_key or os.getenv("GEMINI_API_KEY", "")
+
+
+def readable_disease_name(class_name):
+    """Convert PlantVillage class labels into a more readable name."""
+    return str(class_name).replace("___", " — ").replace("_", " ")
+
+
+def ask_gemini(prompt):
+    """Generate a response using the same Gemini API used by the successful test."""
+    api_key = get_gemini_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "Gemini API key not found. Add GEMINI_API_KEY to your project .env file."
+        )
+
+    client = get_gemini_client(api_key)
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(max_output_tokens=900),
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f"Gemini request failed ({type(error).__name__}): {error}"
+        ) from error
+
+    answer = getattr(response, "text", None)
+    if not answer or not str(answer).strip():
+        raise RuntimeError(
+            "Gemini returned an empty response. Check the model name, API key, "
+            "and API quota, then try again."
+        )
+    return str(answer).strip()
+
+
+def build_disease_guide_prompt(disease_name, model_name, model_score):
+    return f"""
+You are the educational plant-health assistant inside LeafLens AI, a research
+prototype that classifies leaf images using a machine-learning model.
+
+The model's top prediction is: {disease_name}
+Selected classifier: {model_name}
+Classifier output score: {model_score:.2f}%
+
+Create a useful, beginner-friendly disease information guide in Markdown using
+these headings:
+## Disease overview
+## Causes and how it spreads
+## Common symptoms
+## What you can do
+## Prevention and plant care
+## When to seek expert help
+
+Requirements:
+- Treat the label as a model prediction, not a confirmed diagnosis.
+- Explain that symptoms can overlap with other diseases, pests, or nutrient issues.
+- Give practical, low-risk steps first, such as isolating affected plants when
+  appropriate, removing heavily affected material safely, cleaning tools, avoiding
+  overhead watering when suitable, and improving airflow where relevant.
+- Distinguish fungal, bacterial, viral, and non-infectious conditions accurately.
+  Do not describe every disease as fungal.
+- Recommend a pesticide or fungicide only when appropriate for this specific
+  disease; avoid inventing product names, chemical doses, or application rates.
+  Tell users to follow local agricultural guidance and the product label.
+- Do not promise a cure. Explain that management depends on the crop, severity,
+  and local conditions.
+- If the label is a healthy class, explain that no disease was predicted and give
+  general care advice rather than inventing a disease.
+- Use clear, concise language. Do not claim you examined the image yourself.
+"""
+
+
+def build_followup_prompt(disease_name, guide, history, question):
+    conversation = []
+    for item in history[-8:]:
+        role = "User" if item["role"] == "user" else "Assistant"
+        conversation.append(f"{role}: {item['content']}")
+
+    previous = "\n".join(conversation) if conversation else "No follow-up questions yet."
+    return f"""
+You are LeafLens AI's educational plant-health assistant.
+The classifier's predicted label is "{disease_name}". This is not a confirmed
+diagnosis. Use the following disease guide as context, but correct any obvious
+inconsistency rather than inventing facts:
+
+{guide}
+
+Recent conversation:
+{previous}
+
+User's new question: {question}
+
+Answer in simple language, directly and practically. Do not guarantee a cure,
+invent chemical dosages, or replace local agricultural expertise. If the question
+needs crop, location, or severity details to answer safely, say what is missing.
+"""
+
+
+# =========================================================
 # GRAD-CAM
 # =========================================================
 
@@ -746,9 +874,114 @@ if uploaded is not None:
             "in real-world conditions."
         )
 
+        # -----------------------------------------------------
+        # AI disease information and follow-up questions
+        # -----------------------------------------------------
         st.divider()
         st.markdown(
-            '<div class="section-title">03 / Explainable AI</div>',
+            '<div class="section-title">03 / AI Disease Assistant</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="section-note">'
+            'Learn about the predicted condition, its causes, symptoms, '
+            'management, and prevention. This is educational guidance, not a '
+            'confirmed diagnosis.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        disease_name = readable_disease_name(predicted_class)
+        ai_state_key = f"{current_analysis_key}:{predicted_class}"
+        stored_ai_key = st.session_state.get("leaflens_ai_key")
+
+        if stored_ai_key != ai_state_key:
+            st.session_state["leaflens_ai_key"] = ai_state_key
+            st.session_state["leaflens_ai_guide"] = None
+            st.session_state["leaflens_ai_history"] = []
+
+        if st.button(
+            "🌱 Explain this disease with AI",
+            use_container_width=True,
+            key=f"ai_guide_{current_analysis_key}",
+        ):
+            guide_prompt = build_disease_guide_prompt(
+                disease_name,
+                selected_model,
+                top_score,
+            )
+            try:
+                with st.spinner("Gemini is preparing a plant-health guide..."):
+                    guide_text = ask_gemini(guide_prompt)
+                st.session_state["leaflens_ai_guide"] = guide_text
+                st.session_state["leaflens_ai_history"] = []
+            except Exception as error:
+                st.error(
+                    "The AI guide could not be generated. Your disease prediction "
+                    "is still available."
+                )
+                st.caption(str(error))
+
+        guide_text = st.session_state.get("leaflens_ai_guide")
+        if guide_text:
+            with st.container(border=True):
+                st.markdown(guide_text)
+
+            st.markdown("#### Ask a follow-up question")
+            with st.form(key=f"ai_question_form_{current_analysis_key}"):
+                followup_question = st.text_input(
+                    "Your question",
+                    placeholder="e.g. How can I prevent this from spreading?",
+                    max_chars=500,
+                )
+                ask_question = st.form_submit_button(
+                    "Ask Gemini",
+                    use_container_width=True,
+                )
+
+            if ask_question:
+                question = followup_question.strip()
+                if not question:
+                    st.warning("Enter a question first.")
+                else:
+                    history = st.session_state.get("leaflens_ai_history", [])
+                    prompt = build_followup_prompt(
+                        disease_name,
+                        guide_text,
+                        history,
+                        question,
+                    )
+                    try:
+                        with st.spinner("Gemini is preparing an answer..."):
+                            answer = ask_gemini(prompt)
+                        history.extend([
+                            {"role": "user", "content": question},
+                            {"role": "assistant", "content": answer},
+                        ])
+                        st.session_state["leaflens_ai_history"] = history[-12:]
+                    except Exception as error:
+                        st.error(
+                            "Gemini could not answer that question. "
+                            "Your prediction and disease guide are still available."
+                        )
+                        st.caption(str(error))
+
+            for item in st.session_state.get("leaflens_ai_history", []):
+                if item["role"] == "user":
+                    st.markdown(f"**You asked:** {item['content']}")
+                else:
+                    st.markdown("**LeafLens AI:**")
+                    st.markdown(item["content"])
+
+            st.caption(
+                "AI-generated educational information may be incomplete. "
+                "Confirm diagnosis and treatment choices with a qualified "
+                "agricultural expert, especially before applying chemicals."
+            )
+
+        st.divider()
+        st.markdown(
+            '<div class="section-title">04 / Explainable AI</div>',
             unsafe_allow_html=True,
         )
         st.markdown(
