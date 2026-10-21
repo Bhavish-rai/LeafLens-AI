@@ -29,7 +29,7 @@ MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
 CLASS_FILE = REPORTS_DIR / "class_names.json"
 GRADCAM_SCRIPT = ROOT / "src" / "gradcam.py"
-GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 # Load local development secrets without placing them in source code.
 load_dotenv(ROOT / ".env")
@@ -419,10 +419,9 @@ def predict(model, image, model_key, class_names):
 
 @st.cache_resource(show_spinner=False)
 def get_gemini_client(api_key):
-    """Create and reuse a Gemini API client with a finite request timeout."""
     return genai.Client(
         api_key=api_key,
-        http_options=types.HttpOptions(timeout=20000),
+        http_options=types.HttpOptions(timeout=60000),
     )
 
 
