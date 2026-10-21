@@ -24,6 +24,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 # CONFIGURATION
 # =========================================================
 
+
 ROOT = Path(__file__).resolve().parent
 MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
